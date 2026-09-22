@@ -21,24 +21,33 @@ import java.io.IOException;
 import java.util.Map;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Deserializer;
-import org.yangcentral.yangkit.data.api.model.YangDataDocument;
 
-public class KafkaYangJsonSchemaDeserializer<T> extends AbstractKafkaYangJsonSchemaDeserializer
-    implements Deserializer<YangDataDocument> {
+/**
+ * Deserializes YANG-JSON Kafka records into a {@link YangSchemaAndValue}, exposing the resolved
+ * schema id, subject, version and references alongside the validated {@link
+ * org.yangcentral.yangkit.data.api.model.YangDataDocument} payload.
+ *
+ * <p>Use this deserializer instead of {@link KafkaYangJsonSchemaDeserializer} when downstream
+ * consumers need to propagate schema registry metadata (e.g. for enrichment of the record before
+ * publishing it further).
+ */
+public class KafkaYangJsonSchemaMetadataDeserializer extends AbstractKafkaYangJsonSchemaDeserializer
+    implements Deserializer<YangSchemaAndValue> {
 
   /** Constructor used by Kafka consumer. */
-  public KafkaYangJsonSchemaDeserializer() {}
+  public KafkaYangJsonSchemaMetadataDeserializer() {}
 
-  public KafkaYangJsonSchemaDeserializer(SchemaRegistryClient client) {
+  public KafkaYangJsonSchemaMetadataDeserializer(SchemaRegistryClient client) {
     this.schemaRegistry = client;
     this.ticker = ticker(client);
   }
 
-  public KafkaYangJsonSchemaDeserializer(SchemaRegistryClient client, Map<String, ?> props) {
+  public KafkaYangJsonSchemaMetadataDeserializer(
+      SchemaRegistryClient client, Map<String, ?> props) {
     this(client, props, false);
   }
 
-  public KafkaYangJsonSchemaDeserializer(
+  public KafkaYangJsonSchemaMetadataDeserializer(
       SchemaRegistryClient client, Map<String, ?> props, boolean isKey) {
     this.schemaRegistry = client;
     configure(deserializerConfig(props), isKey);
@@ -51,17 +60,17 @@ public class KafkaYangJsonSchemaDeserializer<T> extends AbstractKafkaYangJsonSch
 
   protected void configure(KafkaYangJsonSchemaDeserializerConfig config, boolean isKey) {
     this.isKey = isKey;
-    configure(config, YangDataDocument.class);
+    configure(config, YangSchemaAndValue.class);
   }
 
   @Override
-  public YangDataDocument deserialize(String topic, byte[] data) {
+  public YangSchemaAndValue deserialize(String topic, byte[] data) {
     return deserialize(topic, null, data);
   }
 
   @Override
-  public YangDataDocument deserialize(String topic, Headers headers, byte[] bytes) {
-    return (YangDataDocument) deserialize(false, topic, isKey, headers, bytes);
+  public YangSchemaAndValue deserialize(String topic, Headers headers, byte[] bytes) {
+    return (YangSchemaAndValue) deserialize(true, topic, isKey, headers, bytes);
   }
 
   @Override
