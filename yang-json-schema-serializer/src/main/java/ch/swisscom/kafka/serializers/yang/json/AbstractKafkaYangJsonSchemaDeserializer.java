@@ -35,6 +35,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.errors.InvalidConfigurationException;
 import org.apache.kafka.common.errors.SerializationException;
@@ -48,6 +49,9 @@ public abstract class AbstractKafkaYangJsonSchemaDeserializer<T> extends Abstrac
 
   private static final Logger log =
       LoggerFactory.getLogger(AbstractKafkaYangJsonSchemaDeserializer.class);
+
+  private final Map<Integer, Collection<SubjectVersion>> idToSubjectVersionsCache =
+      new ConcurrentHashMap<>();
 
   protected ObjectMapper objectMapper = Jackson.newObjectMapper();
   protected boolean validate;
@@ -215,7 +219,13 @@ public abstract class AbstractKafkaYangJsonSchemaDeserializer<T> extends Abstrac
 
   private SubjectVersion subjectVersionForId(int id, String preferredSubject)
       throws IOException, RestClientException {
-    Collection<SubjectVersion> subjectVersions = schemaRegistry.getAllVersionsById(id);
+    Collection<SubjectVersion> subjectVersions = idToSubjectVersionsCache.get(id);
+    if (subjectVersions == null) {
+      subjectVersions = schemaRegistry.getAllVersionsById(id);
+      if (subjectVersions != null) {
+        idToSubjectVersionsCache.put(id, subjectVersions);
+      }
+    }
     if (subjectVersions == null || subjectVersions.isEmpty()) {
       return null;
     }

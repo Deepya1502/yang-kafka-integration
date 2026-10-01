@@ -10,14 +10,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.confluent.kafka.schemaregistry.client.MockSchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.rest.entities.SchemaReference;
+import io.confluent.kafka.schemaregistry.client.rest.entities.SubjectVersion;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.dom4j.DocumentException;
@@ -184,5 +187,47 @@ public class KafkaYangJsonSchemaMetadataDeserializerTest {
     assertNotNull(result.getValue());
     assertEquals("test-key", result.getSubject());
     assertEquals(1, result.getVersion());
+  }
+
+  @Test
+  public void deserialize_multipleMessagesSameSchema_cachesGetAllVersionsById() throws Exception {
+    AtomicInteger callCount = new AtomicInteger();
+    SchemaRegistryClient countingClient =
+        new MockSchemaRegistryClient(Collections.singletonList(new YangSchemaProvider())) {
+          @Override
+          public synchronized Collection<SubjectVersion> getAllVersionsById(int id) {
+            callCount.incrementAndGet();
+            return super.getAllVersionsById(id);
+          }
+        };
+    KafkaYangJsonSchemaSerializer localSerializer =
+        new KafkaYangJsonSchemaSerializer(countingClient);
+    localSerializer.configure(new HashMap<>(config), true);
+    KafkaYangJsonSchemaMetadataDeserializer localDeserializer =
+        new KafkaYangJsonSchemaMetadataDeserializer(countingClient);
+    localDeserializer.configure(toStringKeyedMap(config), true);
+
+    YangDataDocument doc =
+        getRecord(
+            this.getClass()
+                .getClassLoader()
+                .getResource("serializer/json/test1/test.yang")
+                .getFile(),
+            this.getClass()
+                .getClassLoader()
+                .getResource("serializer/json/test1/valid.json")
+                .getFile());
+
+    Headers serializerHeaders = new RecordHeaders();
+    byte[] bytes = localSerializer.serialize(topic, serializerHeaders, doc);
+    Headers deserializerHeaders = getDeserializationKafkaHeader(serializerHeaders);
+
+    YangSchemaAndValue result1 = localDeserializer.deserialize(topic, deserializerHeaders, bytes);
+    assertNotNull(result1);
+
+    YangSchemaAndValue result2 = localDeserializer.deserialize(topic, deserializerHeaders, bytes);
+    assertNotNull(result2);
+
+    assertEquals(1, callCount.get());
   }
 }
