@@ -39,16 +39,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.errors.InvalidConfigurationException;
 import org.apache.kafka.common.errors.SerializationException;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.header.Headers;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.yangcentral.yangkit.data.api.model.YangDataDocument;
 import org.yangcentral.yangkit.model.api.codec.YangCodecException;
 
 public abstract class AbstractKafkaYangJsonSchemaDeserializer<T> extends AbstractKafkaSchemaSerDe {
-
-  private static final Logger log =
-      LoggerFactory.getLogger(AbstractKafkaYangJsonSchemaDeserializer.class);
 
   private final Map<Integer, Collection<SubjectVersion>> idToSubjectVersionsCache =
       new ConcurrentHashMap<>();
@@ -92,10 +88,9 @@ public abstract class AbstractKafkaYangJsonSchemaDeserializer<T> extends Abstrac
       boolean includeSchemaAndVersion, String topic, Boolean isKey, Headers headers, byte[] payload)
       throws SerializationException, InvalidConfigurationException {
     if (schemaRegistry == null) {
-      log.error(
+      throw new InvalidConfigurationException(
           "SchemaRegistryClient not found. You need to configure the deserializer "
               + "or use deserializer constructor with SchemaRegistryClient.");
-      return null;
     }
 
     if (payload == null) {
@@ -176,13 +171,9 @@ public abstract class AbstractKafkaYangJsonSchemaDeserializer<T> extends Abstrac
           }
           yangDataDocument = schema.validate(jsonNode);
         } catch (YangCodecException e) {
-          log.error(
-              "YANG JSON {} does not match YANG schema {}: {}",
-              jsonNode,
-              schema.canonicalString(),
-              e.getMessage(),
+          throw new SerializationException(
+              "YANG JSON " + jsonNode + " does not match YANG schema " + schema.canonicalString(),
               e);
-          return null;
         }
       }
       if (jsonNode == null) {
@@ -200,14 +191,11 @@ public abstract class AbstractKafkaYangJsonSchemaDeserializer<T> extends Abstrac
       }
       return yangDataDocument;
     } catch (InterruptedIOException e) {
-      log.error("Timeout deserializing YANG-JSON message for id {}: {}", id, e.getMessage(), e);
-      return null;
+      throw new TimeoutException("Error deserializing YANG-JSON message for id " + id, e);
     } catch (IOException | RuntimeException e) {
-      log.error("Error deserializing YANG-JSON message for id {}: {}", id, e.getMessage(), e);
-      return null;
+      throw new SerializationException("Error deserializing YANG-JSON message for id " + id, e);
     } catch (RestClientException e) {
-      log.error("Error retrieving YANG schema for id {}: {}", id, e.getMessage(), e);
-      return null;
+      throw toKafkaException(e, "Error retrieving YANG schema for id " + id);
     } finally {
       postOp(payload);
     }
